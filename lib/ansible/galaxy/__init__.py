@@ -24,10 +24,13 @@ from __future__ import (absolute_import, division, print_function)
 __metaclass__ = type
 
 import os
+import yaml
 
 from ansible.compat.six import string_types
 
 from ansible.errors import AnsibleError
+from ansible.galaxy.role import GalaxyRole
+from ansible.playbook.role.requirement import RoleRequirement
 
 #      default_readme_template
 #      default_meta_template
@@ -91,3 +94,66 @@ class Galaxy(object):
             return open(myfile).read()
         except Exception as e:
             raise AnsibleError("Could not open %s: %s" % (filename, str(e)))
+
+    def read_role_file(self, role_file=None, display=None):
+        roles_left = []
+        if role_file is None:
+            role_file = self._find_role_file()
+        try:
+            f = open(role_file, 'r')
+            if role_file.endswith('.yaml') or role_file.endswith('.yml'):
+                try:
+                    required_roles =  yaml.safe_load(f.read())
+                except Exception as e:
+                    raise AnsibleError("Unable to load data from the requirements file: %s" % role_file)
+
+                if required_roles is None:
+                    raise AnsibleError("No roles found in file: %s" % role_file)
+
+                for role in required_roles:
+                    if "include" not in role:
+                        role = RoleRequirement.role_yaml_parse(role)
+                        if display is not None:
+                            display.vvv("found role %s in yaml file" % str(role))
+                        if "name" not in role and "scm" not in role:
+                            raise AnsibleError("Must specify name or src for role")
+                        roles_left.append(GalaxyRole(self, **role))
+                    else:
+                        with open(role["include"]) as f_include:
+                            try:
+                                roles_left += [
+                                    GalaxyRole(self, **r) for r in
+                                    map(RoleRequirement.role_yaml_parse,
+                                        yaml.safe_load(f_include))
+                                ]
+                            except Exception as e:
+                                msg = "Unable to load data from the include requirements file: %s %s"
+                                raise AnsibleError(msg % (role_file, e))
+            else:
+                # display.deprecated("going forward only the yaml format will be supported")
+                # roles listed in a file, one per line
+                for rline in f.readlines():
+                    if rline.startswith("#") or rline.strip() == '':
+                        continue
+                    if display is not None:
+                        display.debug('found role %s in text file' % str(rline))
+                    role = RoleRequirement.role_yaml_parse(rline.strip())
+                    roles_left.append(GalaxyRole(self, **role))
+            f.close()
+        except (IOError, OSError) as e:
+            if display is not None:
+                display.error('Unable to open %s: %s' % (role_file, str(e)))
+            raise AnsibleError('Unable to open %s: %s' % (role_file, str(e)))
+        return roles_left
+
+    def _find_role_file(self):
+        role_file_paths = [ # Order?
+            os.getcwd() + "/requirements.yml",
+            os.getcwd() + "/requirements.yaml",
+            os.getcwd() + "/roles/requirements.yml",
+            os.getcwd() + "/roles/requirements.yaml"
+        ]
+        for path in role_file_path:
+            if os.path.exists(path):
+                return path
+        raise AnsibleError('Role file could not be found')

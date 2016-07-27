@@ -335,48 +335,8 @@ class GalaxyCLI(CLI):
         force      = self.get_opt('force', False)
 
         roles_left = []
-        if role_file:
-            try:
-                f = open(role_file, 'r')
-                if role_file.endswith('.yaml') or role_file.endswith('.yml'):
-                    try:
-                        required_roles = yaml.safe_load(f.read())
-                    except Exception as e:
-                        raise AnsibleError("Unable to load data from the requirements file: %s" % role_file)
-
-                    if required_roles is None:
-                        raise AnsibleError("No roles found in file: %s" % role_file)
-
-                    for role in required_roles:
-                        if "include" not in role:
-                            role = RoleRequirement.role_yaml_parse(role)
-                            display.vvv("found role %s in yaml file" % str(role))
-                            if "name" not in role and "scm" not in role:
-                                raise AnsibleError("Must specify name or src for role")
-                            roles_left.append(GalaxyRole(self.galaxy, **role))
-                        else:
-                            with open(role["include"]) as f_include:
-                                try:
-                                    roles_left += [
-                                        GalaxyRole(self.galaxy, **r) for r in
-                                        map(RoleRequirement.role_yaml_parse,
-                                            yaml.safe_load(f_include))
-                                    ]
-                                except Exception as e:
-                                    msg = "Unable to load data from the include requirements file: %s %s"
-                                    raise AnsibleError(msg % (role_file, e))
-                else:
-                    display.deprecated("going forward only the yaml format will be supported")
-                    # roles listed in a file, one per line
-                    for rline in f.readlines():
-                        if rline.startswith("#") or rline.strip() == '':
-                            continue
-                        display.debug('found role %s in text file' % str(rline))
-                        role = RoleRequirement.role_yaml_parse(rline.strip())
-                        roles_left.append(GalaxyRole(self.galaxy, **role))
-                f.close()
-            except (IOError, OSError) as e:
-                display.error('Unable to open %s: %s' % (role_file, str(e)))
+        if role_file is not None:
+            roles_left = self.galaxy.read_role_file(role_file=role_file, display=display)
         else:
             # roles were specified directly, so we'll just go out grab them
             # (and their dependencies, unless the user doesn't want us to).
